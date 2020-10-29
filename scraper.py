@@ -2,16 +2,18 @@
 # -*- coding: utf-8 -*-
 
 
-import requests
-requests.packages.urllib3.disable_warnings() 
-import lxml.html
-import time
-import re
 import json
 import logging
+import lxml.html
+import os.path
+import re
+import requests
+import time
 from collections import namedtuple
+from pathlib import Path
 
 
+requests.packages.urllib3.disable_warnings()
 s = requests.Session()
 headers = {
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:67.0) DeJure",
@@ -19,6 +21,9 @@ headers = {
             "Referer": None,
             "Host": "hcj.gov.ua"
         }
+
+# директорія для даних
+Path("data").mkdir(parents=True, exist_ok=True)
 
 # сервер, шлях
 SRV = "https://hcj.gov.ua"
@@ -314,10 +319,13 @@ for list_item in list_items:
     if data["meta"]["type_talk"] not in hcj_data_out:
         hcj_data_out[data["meta"]["type_talk"]] = {}
     hcj_data_out[data["meta"]["type_talk"]][data["meta"]["talk_code"]] = data
-    with open(f'hcj_{data["meta"]["talk_code"]}.json', "w") as f:
-        json.dump(data, f, ensure_ascii=False)
+    out_session_filename = Path(os.path.join(
+        'data', f'hcj_{data["meta"]["talk_code"]}.json'))
+    if not out_session_filename.is_file():
+        with open(out_session_filename, "w") as f:
+            json.dump(data, f, ensure_ascii=False)
     time.sleep(0.85)
 
 
-with open(f'hcj_data.json', "w") as f:
-        json.dump(hcj_data_out, f, ensure_ascii=False)
+with open(os.path.join("data", "hcj_data.json"), "w") as f:
+    json.dump(hcj_data_out, f, ensure_ascii=False)
