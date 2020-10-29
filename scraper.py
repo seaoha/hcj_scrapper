@@ -43,10 +43,10 @@ DP_DICT = {
 def get_cvk_page(url):
     '''Повертає текст сторінки або нічого
     '''
-    res = s.get(url, headers=headers, verify = False)
+    res = s.get(url, headers=headers, verify=False)
     # print(res.encoding)
     # print(res.url)
-    res.encoding="utf-8"
+    res.encoding = "utf-8"
     if res.status_code != 200:
         print(f"Error <= {url}")
         return
