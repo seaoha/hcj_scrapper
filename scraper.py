@@ -10,6 +10,7 @@ import re
 import requests
 import time
 from collections import namedtuple
+from datetime import datetime
 from pathlib import Path
 
 
@@ -51,6 +52,29 @@ def get_cvk_page(url):
         print(f"Error <= {url}")
         return
     return res.text
+
+
+def date2iso(date_string: str) -> str:
+    """Конвертує дату у німецькому форматі DD.MM.YYYY у формат ISO8601
+    Аргументи:
+        date_string (str) -- дата у форматі DD.MM.YYYY
+
+    Повертає:
+        str: дату у форматі YYYY-MM-DD, якщо перетворення успішне. Якщо
+        відбулася помилка в процесі перетворення, повертає аргумент
+        date_string
+    """
+    try:
+        return datetime.strptime(date_string, "%d.%m.%Y").date().isoformat()
+    except:
+        return date_string
+
+
+def extract_date(json_data):
+    try:
+        return json_data['meta']['talk_date_iso']
+    except KeyError:
+        return '2099-12-31'
 
 
 def get_proj_link(url):
@@ -278,33 +302,19 @@ def get_project_data(list_item):
     # print(proj_link)
     if type_talk == "vrp":
         project_data = get_vrp_project(proj_link[0], proj_type=type_talk)
-        data = {
-            "project": project_data["session_project"],
-            "meta": {"talk_date": talk_date[0],
-                     "talk_name": talk_name[0],
-                     "type_talk": type_talk,
-                     "talk_href": talk_href[0],
-                     "talk_code": talk_code,
-                     "proj_link": proj_link[0],
-                     "file_name": project_data["file_name"],
-                     "file_link": project_data["file_link"]
-                     }
-                }
     elif type_talk in ["dp1", "dp2", "dp3"]:
         project_data = get_disciplinary_project(
-                       proj_link[0], proj_type=type_talk)
-        data = {
-            "project": project_data["session_project"],
-            "meta": {"talk_date": talk_date[0],
-                     "talk_name": talk_name[0],
-                     "type_talk": type_talk,
-                     "talk_href": talk_href[0],
-                     "talk_code": talk_code,
-                     "proj_link": proj_link[0],
-                     "file_name": project_data["file_name"],
-                     "file_link": project_data["file_link"]
-                     }
-                }
+            proj_link[0], proj_type=type_talk)
+    meta = {"talk_date": talk_date[0],
+            "talk_date_iso": date2iso(talk_date[0]),
+            "talk_name": talk_name[0],
+            "type_talk": type_talk,
+            "talk_href": talk_href[0],
+            "talk_code": talk_code,
+            "proj_link": proj_link[0],
+            "file_name": project_data["file_name"],
+            "file_link": project_data["file_link"]}
+    data = {"project": project_data["session_project"], "meta": meta}
     return data
 
 
@@ -312,20 +322,28 @@ ann_res = get_cvk_page(SRV + PATH)
 ann_content = lxml.html.fromstring(ann_res)
 list_items = ann_content.xpath('//*[@id="block-system-main"]/div/div/div/div')
 hcj_data_out = {}
+hcj_data_box = []
+
 for list_item in list_items:
     data = get_project_data(list_item)
     if data is None:
         continue
-    if data["meta"]["type_talk"] not in hcj_data_out:
-        hcj_data_out[data["meta"]["type_talk"]] = {}
-    hcj_data_out[data["meta"]["type_talk"]][data["meta"]["talk_code"]] = data
+    hcj_data_box.append(data)
+
+# Сортування
+hcj_data_box.sort(key=extract_date)
+
+for data in hcj_data_box:
+    hcj_data_out[data["meta"]["talk_code"]] = data
     out_session_filename = Path(os.path.join(
         'data', f'hcj_{data["meta"]["talk_code"]}.json'))
+    # Дамп на диск окремого засідання, якщо файлу з таким ім'ям 
+    # на диску не існує
     if not out_session_filename.is_file():
         with open(out_session_filename, "w") as f:
             json.dump(data, f, ensure_ascii=False)
     time.sleep(0.85)
 
-
+# Дамп на диск усіх засідань
 with open(os.path.join("data", "hcj_data.json"), "w") as f:
     json.dump(hcj_data_out, f, ensure_ascii=False)
