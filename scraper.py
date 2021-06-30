@@ -10,6 +10,7 @@ import re
 import requests
 import time
 from collections import namedtuple
+from tidylib import tidy_document
 from datetime import datetime
 from pathlib import Path
 
@@ -32,8 +33,8 @@ PATH = "/announces"
 # constants
 TYPE_TALK_RE = re.compile(
     "^Засідання (?:(?P<name>Першої|Другої|Третьої) Дисциплінарної палати )?Вищої ради правосуддя$")
-DIGIT_SECTION_RE = re.compile("^\d")
-OTHER = re.compile("^\d+?\.?\s+?Різне$")
+DIGIT_SECTION_RE = re.compile(r"^\d")
+OTHER = re.compile(r"^\d+?\.?\s+?Різне$")
 DP_DICT = {
     "першої": "dp1",
     "другої": "dp2",
@@ -51,7 +52,9 @@ def get_cvk_page(url):
     if res.status_code != 200:
         print(f"Error <= {url}")
         return
-    return res.text
+    tidy, errors = tidy_document(res.text)
+    # print(errors)
+    return tidy
 
 
 def date2iso(date_string: str) -> str:
@@ -95,7 +98,7 @@ def extract_lost_question(text, last_title):
         # Not found
         return ''
     question = m.groups(1)
-    question = re.sub("\s{1,}", ' ', question[0])
+    question = re.sub(r"\s{1,}", ' ', question[0])
     question_data = extract_spokesperson(question) + [False]
     try:
         out = question_data
@@ -107,7 +110,8 @@ def extract_lost_question(text, last_title):
 
 def extract_project(element):
     # елемнтом виступає article
-    titles = element.xpath('.//p[@class="rtejustify"]')
+    # titles = element.xpath('.//p[@class="rtejustify"]')
+    titles = element.xpath('.//div[@class="field-items"]//p[not(@class="rtecenter")]//strong')
     if len(titles) == 1:
         try:
             if titles[0].xpath('.//text()')[0] == '\xa0':
@@ -164,17 +168,17 @@ def extract_questions(question_lists):
 
 
 def spokesperson_fix(string):
-    string = re.sub("\s+", " ", re.sub('\xa0', ' ', string))
-    string = re.sub('\((?:\s+?)?(.+?)(?:\s+?)?\)', '(\\1)', string)
-    string = re.sub(" \.", ".", string)
-    if not re.search("Д\s+?оповідач", string, re.I):
+    string = re.sub(r"\s+", " ", re.sub('\xa0', ' ', string))
+    string = re.sub(r'\((?:\s+?)?(.+?)(?:\s+?)?\)', '(\\1)', string)
+    string = re.sub(r"\s\.", ".", string)
+    if not re.search(r"Д\s+?оповідач", string, re.I):
         return string
-    return re.sub("Д\s+?оповідач", 'Доповідач', string)
+    return re.sub(r"Д\s+?оповідач", 'Доповідач', string)
 
 
 def extract_spokesperson(string):
     splitted = [re.sub(";$", "", x.strip()) for x in
-                re.split("\(Доповідач(?:\s+?[-–—])?(.+?)\)", string, re.I)]
+                re.split(r"\(Доповідач(?:\s+?[-–—])?(.+?)\)", string, re.I)]
     splitted = [x.strip() for x in splitted if x]
     # print("splitted", splitted)
     if len(splitted) == 1:
@@ -200,13 +204,13 @@ def process_vrp_questions(questions):
     for q in questions:
         if q['questions'] == []:
             continue
-        new_content = [x + ")" if re.match("^\d+$", x) else x
+        new_content = [x + ")" if re.match(r"^\d+$", x) else x
                        for x in q['questions']]
         q['questions'] = " ".join(new_content).replace(
             "- у зв’язку з поданням заяви про відставку", "")
         q['questions'] = [
-            re.sub("[\:\.\,\;\s]$", "", y).strip() for x in
-            re.split("\d+?\) ", q['questions']) if (y:=x.strip())]
+            re.sub(r"[\:\.\,\;\s]$", "", y).strip() for x in
+            re.split(r"\d+?\) ", q['questions']) if (y:=x.strip())]
     # Коротенькі питання, що менші ніж 7 символів, зливаються з першим питанням
     # у списку питань. Питання потім видаляється, тому перелік питань може
     # бути порожнім
@@ -223,14 +227,14 @@ def process_vrp_questions(questions):
 def extract_vrp_project(element):
     # елемнтом виступає article
     titles = element.xpath('.//p//u/text()')
-    clean_titles = [re.sub("\s+", " ", x).strip() for x in titles]
+    clean_titles = [re.sub(r"\s+", " ", x).strip() for x in titles]
     clean_titles = [
         re.sub(r'[\s:.]$', '', x).strip() for x in clean_titles
         if DIGIT_SECTION_RE.search(x)]
     # text = element.xpath(".//p//text()")
     text = element.xpath(".//*[self::li or self::p]//text()")
-    text = [re.sub("\s+", " ", x).strip() for x in text]
-    text = [y for x in text if (y:=re.sub('[\s:.]$', '', x).strip())]
+    text = [re.sub(r"\s+", " ", x).strip() for x in text]
+    text = [y for x in text if (y:=re.sub(r'[\s:.]$', '', x).strip())]
     questions = []
     q = None
     first_line = False
