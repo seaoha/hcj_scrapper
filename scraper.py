@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+
 import json
 import logging
 import lxml.html
@@ -9,25 +10,27 @@ import re
 import requests
 import time
 from collections import namedtuple
+from tidylib import tidy_document
 from datetime import datetime
 from pathlib import Path
+
 
 requests.packages.urllib3.disable_warnings()
 s = requests.Session()
 headers = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:67.0) DeJure",
-    "Connection": "keep-alive",
-    "Referer": None,
-    "Host": "hcj.gov.ua"
-}
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:67.0) DeJure",
+            "Connection": "keep-alive",
+            "Referer": None,
+            "Host": "hcj.gov.ua"
+        }
 
-# Directory for data
+# директорія для даних
 Path("data").mkdir(parents=True, exist_ok=True)
 
-# Server, path
+# сервер, шлях
 SRV = "https://hcj.gov.ua"
 PATH = "/announces"
-# Constants
+# constants
 TYPE_TALK_RE = re.compile(
     "^Засідання (?:(?P<name>Першої|Другої|Третьої) Дисциплінарної палати )?Вищої ради правосуддя$")
 DIGIT_SECTION_RE = re.compile(r"^\d")
@@ -40,21 +43,29 @@ DP_DICT = {
 
 
 def get_cvk_page(url):
-    '''Returns the text of the page or None'''
+    '''Повертає текст сторінки або нічого
+    '''
     res = s.get(url, headers=headers, verify=False)
+    # print(res.encoding)
+    # print(res.url)
     res.encoding = "utf-8"
     if res.status_code != 200:
         print(f"Error <= {url}")
         return
-    return res.text
+    tidy, errors = tidy_document(res.text)
+    # print(errors)
+    return tidy
 
 
 def date2iso(date_string: str) -> str:
-    """Converts a date in German format DD.MM.YYYY to ISO8601 format
-    Args:
-        date_string (str): Date in format DD.MM.YYYY
-    Returns:
-        str: Date in format YYYY-MM-DD if conversion successful. If an error occurs during conversion, returns the argument date_string
+    """Конвертує дату у німецькому форматі DD.MM.YYYY у формат ISO8601
+    Аргументи:
+        date_string (str) -- дата у форматі DD.MM.YYYY
+
+    Повертає:
+        str: дату у форматі YYYY-MM-DD, якщо перетворення успішне. Якщо
+        відбулася помилка в процесі перетворення, повертає аргумент
+        date_string
     """
     try:
         return datetime.strptime(date_string, "%d.%m.%Y").date().isoformat()
@@ -80,8 +91,8 @@ def get_proj_link(url):
 def extract_lost_question(text, last_title):
     out = None
     last_title = last_title.replace(".", "\\.") + ".+\\n"
-    full_text = "\n".join([y for x in text if (y := x.strip())])
-    if (m := re.search(
+    full_text = "\n".join([y for x in text if (y:=x.strip())])
+    if (m:=re.search(
             rf"^{last_title}(.+?(?:.+)\n(?:.+?\n)+)Секретар ",
             full_text, re.MULTILINE)) is None:
         # Not found
@@ -98,6 +109,8 @@ def extract_lost_question(text, last_title):
 
 
 def extract_project(element):
+    # елемнтом виступає article
+    # titles = element.xpath('.//p[@class="rtejustify"]')
     titles = element.xpath('.//div[@class="field-items"]//p[not(@class="rtecenter")]//strong')
     if len(titles) == 1:
         try:
@@ -109,14 +122,21 @@ def extract_project(element):
         titles = element.xpath('.//p//u')
     titles_list = []
     for p in titles:
+        # print("> ", "'" + p.xpath('.//text()') + "'")
+        # print(p.xpath('.//text()'))
         title = "".join(p.xpath('.//text()')).strip()
         if not title or DIGIT_SECTION_RE.search(title) is None:
             continue
+        #  re.sub(pattern, repl, string, count=0, flags=0)
         title = re.sub("[:.,]$", "", title)
+        # print(title)
         titles_list.append(title)
+    # питання
     question_lists = element.xpath(".//ol")
     questions = extract_questions(question_lists)
+    # print("questions", questions)
     if len(titles_list) - len(questions) == 1:
+        # пошук останнього питання, яке знаходиться поза списком
         last_title = titles_list[-1]
         lost_question = extract_lost_question(
             element.xpath("//article//p//text()"), last_title)
@@ -134,6 +154,7 @@ def extract_project(element):
 
 
 def extract_questions(question_lists):
+    # print("question_lists", question_lists,)
     questions_sections = [
         [spokesperson_fix(" ".join(q.xpath(".//text()"))) for q in qlist]
         for qlist in question_lists]
@@ -159,6 +180,7 @@ def extract_spokesperson(string):
     splitted = [re.sub(";$", "", x.strip()) for x in
                 re.split(r"\(Доповідач(?:\s+?[-–—])?(.+?)\)", string, re.I)]
     splitted = [x.strip() for x in splitted if x]
+    # print("splitted", splitted)
     if len(splitted) == 1:
         splitted.append(None)
     return splitted
@@ -188,7 +210,10 @@ def process_vrp_questions(questions):
             "- у зв’язку з поданням заяви про відставку", "")
         q['questions'] = [
             re.sub(r"[\:\.\,\;\s]$", "", y).strip() for x in
-            re.split(r"\d+?\) ", q['questions']) if (y := x.strip())]
+            re.split(r"\d+?\) ", q['questions']) if (y:=x.strip())]
+    # Коротенькі питання, що менші ніж 7 символів, зливаються з першим питанням
+    # у списку питань. Питання потім видаляється, тому перелік питань може
+    # бути порожнім
     for que in questions:
         q_title, q_body = que["title"], que["questions"]
         if len(q_title) > 7 or not q_body:
@@ -200,14 +225,16 @@ def process_vrp_questions(questions):
 
 
 def extract_vrp_project(element):
+    # елемнтом виступає article
     titles = element.xpath('.//p//u/text()')
     clean_titles = [re.sub(r"\s+", " ", x).strip() for x in titles]
     clean_titles = [
         re.sub(r'[\s:.]$', '', x).strip() for x in clean_titles
         if DIGIT_SECTION_RE.search(x)]
+    # text = element.xpath(".//p//text()")
     text = element.xpath(".//*[self::li or self::p]//text()")
     text = [re.sub(r"\s+", " ", x).strip() for x in text]
-    text = [y for x in text if (y := re.sub(r'[\s:.]$', '', x).strip())]
+    text = [y for x in text if (y:=re.sub(r'[\s:.]$', '', x).strip())]
     questions = []
     q = None
     first_line = False
@@ -228,12 +255,15 @@ def extract_vrp_project(element):
 
 
 def get_vrp_project(url, proj_type=None):
+    # print("VRP_Url", url)
+    # proj_link[0], proj_type=type_talk
     proj_res = get_cvk_page(url)
     proj_content = lxml.html.fromstring(proj_res)
     docx_link = proj_content.xpath(
         '//article[starts-with(@id, "node-")]/div[2]//a/@href')
     docx_name = proj_content.xpath(
         '//article[starts-with(@id, "node-")]/div[2]//a/text()')
+    # print(docx_link, docx_name)
     article = proj_content.xpath('//*[starts-with(@id, "node-")]')
     project = extract_vrp_project(article[0])
     return {"session_project": project,
@@ -242,22 +272,38 @@ def get_vrp_project(url, proj_type=None):
 
 
 def get_project_data(list_item):
+    # дата засідання
     talk_date = list_item.xpath(
         "./div[1]/div[@class='field-content']/span[@class='date-display-single']/text()")
+    # назва засідання
     talk_name = list_item.xpath(
         "./div[2]/span[@class='field-content']/a/text()")
-    if (m := TYPE_TALK_RE.match(talk_name[0])) is None:
+    # тип засідання
+    try:
+        print(f"> {talk_name[0]}")
+    except:
+        print(talk_name)
+    if (m:=TYPE_TALK_RE.match(talk_name[0])) is None:
+        # не ВРП, не палата
         return
     name_org = m.group('name')
     if name_org is None:
+        # сама ВРП
         type_talk = "vrp"
     else:
+        # print(name_org)
+        # палати
         type_talk = DP_DICT[name_org.lower()]
+    # посилання на проєкт зі сторінки анонсу
     talk_href = list_item.xpath(
         "./div[2]/span[@class='field-content']/a/@href")
+    # номер засідання
     session_num = talk_href[0].split('-')[-1]
     talk_code = type_talk + "_" + session_num.zfill(4)
+    # print(talk_code)
+    # посилання на власне проєкт
     proj_link = get_proj_link(talk_href[0])
+    # print(proj_link)
     if type_talk == "vrp":
         project_data = get_vrp_project(proj_link[0], proj_type=type_talk)
     elif type_talk in ["dp1", "dp2", "dp3"]:
@@ -288,16 +334,20 @@ for list_item in list_items:
         continue
     hcj_data_box.append(data)
 
+# Сортування
 hcj_data_box.sort(key=extract_date)
 
 for data in hcj_data_box:
     hcj_data_out[data["meta"]["talk_code"]] = data
     out_session_filename = Path(os.path.join(
         'data', f'hcj_{data["meta"]["talk_code"]}.json'))
+    # Дамп на диск окремого засідання, якщо файлу з таким ім'ям 
+    # на диску не існує
     if not out_session_filename.is_file():
         with open(out_session_filename, "w") as f:
             json.dump(data, f, ensure_ascii=False)
     time.sleep(0.85)
 
+# Дамп на диск усіх засідань
 with open(os.path.join("data", "hcj_data.json"), "w") as f:
     json.dump(hcj_data_out, f, ensure_ascii=False)
